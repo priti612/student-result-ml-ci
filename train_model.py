@@ -76,7 +76,17 @@ class TestPredictionAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["prediction"], "FAIL")
         self.assertEqual(response.get_json()["prediction_code"], 0)
+    metrics = {
+        "accuracy": float(accuracy),
+        "training_records": len(X_train),
+        "testing_records": len(X_test)
+    }
 
+    with open("metrics.json", "w") as file:
+        json.dump(metrics, file, indent=4)
+
+    print("Metrics saved as metrics.json")
+    return accuracy
 
 if __name__ == "__main__":
     unittest.main()
