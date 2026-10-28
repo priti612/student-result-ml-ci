@@ -27,10 +27,17 @@ def load_model():
 
 
 @app.get("/")
-def health_check():
+def home():
     return jsonify({
         "status": "ok",
         "service": "student-result-prediction"
+    })
+
+
+@app.get("/health")
+def health_check():
+    return jsonify({
+        "status": "healthy"
     })
 
 
