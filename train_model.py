@@ -1,92 +1,107 @@
 
-import unittest
-from unittest.mock import patch
+import json
 
-import app as prediction_app
+import joblib
+import numpy as np
+import pandas as pd
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 
-class TestPredictionAPI(unittest.TestCase):
+def create_dataset():
+    rng = np.random.default_rng(42)
+    number_of_students = 300
 
-    def setUp(self):
-        prediction_app.app.config["TESTING"] = True
-        self.client = prediction_app.app.test_client()
+    data = pd.DataFrame({
+        "attendance": rng.integers(50, 101, number_of_students),
+        "internal_marks": rng.integers(20, 101, number_of_students),
+        "assignment_marks": rng.integers(30, 101, number_of_students),
+        "previous_score": rng.integers(30, 101, number_of_students)
+    })
 
-    def test_home_endpoint(self):
-        response = self.client.get("/")
+    data["weighted_score"] = (
+        0.25 * data["attendance"]
+        + 0.35 * data["internal_marks"]
+        + 0.20 * data["assignment_marks"]
+        + 0.20 * data["previous_score"]
+    )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["status"], "ok")
+    # 1 = PASS, 0 = FAIL
+    data["result"] = (data["weighted_score"] >= 60).astype(int)
 
-    def test_missing_json_body(self):
-        response = self.client.post("/predict", json={})
+    return data
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("error", response.get_json())
 
-    def test_missing_required_fields(self):
-        response = self.client.post(
-            "/predict",
-            json={"attendance": 90}
-        )
+def train_model():
+    print("Creating dataset...")
+    data = create_dataset()
+    data.to_csv("student_results.csv", index=False)
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("missing_fields", response.get_json())
+    print("Dataset created successfully.")
+    print("Number of records:", len(data))
 
-    @patch("app.load_model")
-    def test_successful_prediction(self, mock_load_model):
-        class FakeModel:
-            def predict(self, data):
-                self.assert_columns = list(data.columns)
-                return [1]
+    features = [
+        "attendance",
+        "internal_marks",
+        "assignment_marks",
+        "previous_score"
+    ]
 
-        mock_load_model.return_value = FakeModel()
+    X = data[features]
+    y = data["result"]
 
-        response = self.client.post(
-            "/predict",
-            json={
-                "attendance": 90,
-                "internal_marks": 80,
-                "assignment_marks": 85,
-                "previous_score": 75
-            }
-        )
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.20,
+        random_state=42,
+        stratify=y
+    )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["prediction"], "PASS")
-        self.assertEqual(response.get_json()["prediction_code"], 1)
+    print("Training records:", len(X_train))
+    print("Testing records:", len(X_test))
 
-    @patch("app.load_model")
-    def test_fail_prediction(self, mock_load_model):
-        class FakeModel:
-            def predict(self, data):
-                return [0]
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("classifier", LogisticRegression(
+            max_iter=1000,
+            random_state=42
+        ))
+    ])
 
-        mock_load_model.return_value = FakeModel()
+    print("Training model...")
+    model.fit(X_train, y_train)
 
-        response = self.client.post(
-            "/predict",
-            json={
-                "attendance": 55,
-                "internal_marks": 40,
-                "assignment_marks": 45,
-                "previous_score": 35
-            }
-        )
+    predictions = model.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+    matrix = confusion_matrix(y_test, predictions)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json()["prediction"], "FAIL")
-        self.assertEqual(response.get_json()["prediction_code"], 0)
+    print("\nModel Evaluation")
+    print("----------------")
+    print("Accuracy:", round(accuracy, 4))
+    print("\nConfusion Matrix:")
+    print(matrix)
+
+    joblib.dump(model, "student_result_model.pkl")
+    print("\nModel saved as student_result_model.pkl")
+
     metrics = {
         "accuracy": float(accuracy),
-        "training_records": len(X_train),
-        "testing_records": len(X_test)
+        "training_records": int(len(X_train)),
+        "testing_records": int(len(X_test))
     }
 
     with open("metrics.json", "w") as file:
         json.dump(metrics, file, indent=4)
 
     print("Metrics saved as metrics.json")
+
     return accuracy
 
+
 if __name__ == "__main__":
-    unittest.main()
+    train_model()
